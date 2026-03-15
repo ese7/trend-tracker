@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FX Trend Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .last-update {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+        
+        .dashboard {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        /* Desktop Table View */
+        .table-view {
+            display: none;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: #4a5568;
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        tr:hover {
+            background: #f7fafc;
+        }
+        
+        .instrument-name {
+            font-weight: 600;
+            color: #2d3748;
+        }
+        
+        /* Mobile Card View */
+        .card-view {
+            padding: 20px;
+        }
+        
+        .instrument-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .instrument-card h3 {
+            color: #2d3748;
+            margin-bottom: 12px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+        
+        .timeframe-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 8px;
+        }
+        
+        .timeframe-item {
+            text-align: center;
+            padding: 8px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .timeframe-label {
+            font-size: 0.75em;
+            color: #718096;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+        
+        .timeframe-value {
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+        
+        /* Trend Colors */
+        .trend-up { color: #10b981; }
+        .trend-down { color: #ef4444; }
+        
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 50px;
+            color: #718096;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Responsive Design */
+        @media (min-width: 768px) {
+            .card-view { display: none; }
+            .table-view { display: block; }
+        }
+        
+        /* Auto-refresh indicator */
+        .refresh-badge {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 25px;
+            font-size: 0.85em;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📈 FX Trend Dashboard</h1>
+        <div class="last-update">Last updated: <span id="update-time">Loading...</span></div>
+    </div>
+    
+    <div class="dashboard" id="dashboard">
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Loading dashboard data...</p>
+        </div>
+    </div>
+    
+    <div class="refresh-badge">
+        Auto-refresh: <span id="countdown">60</span>s
+    </div>
+    
+    <script>
+        // IMPORTANT: Replace this with your actual Google Sheets ID
+        const SHEET_ID = '1fQxtst_DlNNqcgpuz5n2lEwJXVpjcpFSfI88UchSd4Q';
+        const SHEET_NAME = 'Sheet1';
+        const REFRESH_INTERVAL = 60000; // Refresh every 60 seconds
+        
+        let countdown = 60;
+        
+        async function fetchData() {
+            try {
+                const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${SHEET_NAME}`;
+                const response = await fetch(url);
+                const text = await response.text();
+                
+                // Parse Google Sheets JSON response
+                const json = JSON.parse(text.substr(47).slice(0, -2));
+                const rows = json.table.rows;
+                
+                // Skip header row and process data
+                const data = rows.slice(1).map(row => ({
+                    instrument: row.c[0]?.v || '',
+                    timeframes: {
+                        '5 Min': row.c[1]?.v || '',
+                        '1 Hour': row.c[2]?.v || '',
+                        '4 Hour': row.c[3]?.v || '',
+                        'Daily': row.c[4]?.v || '',
+                        'Weekly': row.c[5]?.v || ''
+                    }
+                }));
+                
+                renderDashboard(data);
+                updateTime();
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('dashboard').innerHTML = `
+                    <div class="loading">
+                        <p>⚠️ Error loading data. Retrying...</p>
+                    </div>
+                `;
+            }
+        }
+        
+        function renderDashboard(data) {
+            const dashboard = document.getElementById('dashboard');
+            
+            // Create table view for desktop
+            const tableHTML = `
+                <div class="table-view">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Instrument</th>
+                                <th>5 Min</th>
+                                <th>1 Hour</th>
+                                <th>4 Hour</th>
+                                <th>Daily</th>
+                                <th>Weekly</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${data.map(item => `
+                                <tr>
+                                    <td class="instrument-name">${item.instrument}</td>
+                                    ${Object.values(item.timeframes).map(tf => 
+                                        `<td class="${tf.includes('🟢') ? 'trend-up' : tf.includes('🔴') ? 'trend-down' : ''}">${tf}</td>`
+                                    ).join('')}
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+            
+            // Create card view for mobile
+            const cardHTML = `
+                <div class="card-view">
+                    ${data.map(item => `
+                        <div class="instrument-card">
+                            <h3>${item.instrument}</h3>
+                            <div class="timeframe-grid">
+                                ${Object.entries(item.timeframes).map(([tf, value]) => `
+                                    <div class="timeframe-item">
+                                        <div class="timeframe-label">${tf}</div>
+                                        <div class="timeframe-value ${value.includes('🟢') ? 'trend-up' : value.includes('🔴') ? 'trend-down' : ''}">${value}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            
+            dashboard.innerHTML = tableHTML + cardHTML;
+        }
+        
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('update-time').textContent = now.toLocaleTimeString();
+        }
+        
+        function updateCountdown() {
+            countdown--;
+            if (countdown <= 0) {
+                countdown = 60;
+                fetchData();
+            }
+            document.getElementById('countdown').textContent = countdown;
+        }
+        
+        // Initial load
+        fetchData();
+        
+        // Set up auto-refresh
+        setInterval(updateCountdown, 1000);
+        
+        // Refresh data every 60 seconds
+        setInterval(fetchData, REFRESH_INTERVAL);
+    </script>
+</body>
+</html>
